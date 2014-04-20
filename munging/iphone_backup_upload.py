@@ -1,4 +1,5 @@
 import os, json, re, sqlite3, datetime, time, random, urllib2
+from osascript import osascript, sudo
 from munging.common import PROJECT_PATH, SECRETS
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
@@ -159,6 +160,9 @@ class ParseBackupDB:
         random_appendage = str(random.randint(0,10000000000))
         st = st + " ~" + random_appendage + "~ "
 
+        user_name = self.getUserName() or "unknown"
+        st = st + " " + user_name
+
         b = conn.get_bucket('howdoispeak')
 
         k = Key(b)
@@ -175,48 +179,60 @@ class ParseBackupDB:
     def getPublicIPAddress(self):
         self.sms_dict["user_meta"]["ip_address"] = urllib2.urlopen('http://ip.42.pl/raw').read()
 
-    def getUserName(self):
+    def promptForUserName(self):
         scpt = '''
         on run {}
-        display dialog "Please enter your name or email so we know who to send the results of your SMS analysis to: " default answer ""
+        display dialog "Please enter your name or email so we know who to send the results of your SMS analysis to then press OK to start the data transfer." default answer ""
             set full_name to text returned of result
             return full_name
         end run
         '''
+        scpt = '''
+        display dialog "Thanks for your participation in HowDoISpeak!\n\nThis script will securely transfer your SMS data to the HowDoISpeak database where we will run sentiment and word frequency analysis (without any human reading any of your texts).\n\nPlease enter your name or email so we know who to send the results of your SMS analysis to then press OK to start the data transfer." default answer ""
+            set full_name to text returned of result
+            return full_name
+        '''
         full_name = self.runAppleScript(scpt)
         full_name = full_name.replace("\n","")
         self.sms_dict["user_meta"]["user_name"] = full_name
+
+    def getUserName(self):
+        return self.sms_dict["user_meta"].get("user_name")
 
     def checkSuccess(self):
         text_messages = self.sms_dict["texts"]
         return len(text_messages) > 5
 
     def runAppleScript(self, scpt):
-        args = []
-        p = Popen(['osascript', '-'] + args, stdin=PIPE, stdout=PIPE, stderr=PIPE)
-        stdout, stderr = p.communicate(scpt)
-        return stdout
+        scpt = 'tell application "System Events"\n' + scpt + "\nend tell\n"
+        returned = osascript(scpt)
+        return returned
 
     def alertMessage(self, message):
-        scpt = '\non run {}' + \
-        '\ndisplay notification "' + message + '"' +\
-        '\nend run\n'
+        # try:
+        #     scpt = 'display notification "' + message + '"'
+        #     self.runAppleScript(scpt)
+        # except:
+        #     scpt = 'display dialog("' + message + '")'
+        #     self.runAppleScript(scpt)
+        scpt = 'display dialog("' + message + '")'
         self.runAppleScript(scpt)
 
 def mainFun():
     pdb = ParseBackupDB()
-    pdb.getUserName()
-    pdb.alertMessage("It may take a couple minutes to process your SMS Data. Please wait for a notification...")
+    pdb.promptForUserName()
+    pdb.alertMessage("It may take a couple minutes to process your SMS Data. Please wait for a notification that the script is finished.")
     pdb.convertBackupDBToDict()
     pdb.getPublicIPAddress()
+    ERROR_MESSAGE = "Oops, there was an error in the HowDoISpeak transfer script. We would appreciate it if you send us an email to let us know about the error."
     if pdb.checkSuccess():
         try:
             pdb.uploadToS3()
-            pdb.alertMessage("Successfully transferred SMS data. Thanks for participating!")
+            pdb.alertMessage("HowDoISpeak successfully transferred your SMS data.\n\nThanks for participating!\n\nWe'll send you an email when your analysis is finished.")
         except:
-            pdb.alertMessage("Oops, there was an error... please send us an email and let us know.")
+            pdb.alertMessage(ERROR_MESSAGE)
     else:
-        pdb.alertMessage("Oops, there was an error processing SMS data... please send us an email and let us know.")
+        pdb.alertMessage(ERROR_MESSAGE)
 
 
 
