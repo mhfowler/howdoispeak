@@ -5,12 +5,10 @@ from boto.s3.key import Key
 from subprocess import Popen, PIPE
 
 HOME_DIR = os.path.expanduser("~")
-MAC_IPHONE_BACKUP_DIR_RELATIVE = "/Library/Application Support/MobileSync/Backup/132f8dfb06a1053b1c134657499bf79abc12b6f0"
+MAC_IPHONE_BACKUP_DIR_RELATIVE = "/Library/Application Support/MobileSync/Backup/"
 MAC_IPHONE_BACKUP_DIR = HOME_DIR + MAC_IPHONE_BACKUP_DIR_RELATIVE
 MAC_SMS_BACKUP_FILE = "3d0d7e5fb2ce288813306e4d4636395e047a3d28"
-MAC_SMS_BACKUP_PATH = os.path.join(MAC_IPHONE_BACKUP_DIR, MAC_SMS_BACKUP_FILE)
 MAC_CONTACTS_BACKUP_FILE = "31bb7ba8914766d4ba40d6dfb6113c8b614be442"
-MAC_CONTACTS_BACKUP_PATH = os.path.join(MAC_IPHONE_BACKUP_DIR, MAC_CONTACTS_BACKUP_FILE)
 
 
 class ParseBackupDB:
@@ -22,6 +20,9 @@ class ParseBackupDB:
         }
     phone_number_to_name = {}
     num_unknown = 0
+    MAC_SMS_BACKUP_PATH = ""
+    MAC_CONTACTS_BACKUP_PATH = ""
+    MAC_BACKUP_PATH = ""
 
     def stripPhoneNumber(self,phone_number):
         phone_number = re.sub('[^0-9]', '', phone_number)
@@ -30,9 +31,10 @@ class ParseBackupDB:
         return phone_number
 
 
-    def populateHandleIDToPhoneNumber(self,db_path=MAC_SMS_BACKUP_PATH):
+    def populateHandleIDToPhoneNumber(self):
 
            # make db connection
+        db_path=self.MAC_SMS_BACKUP_PATH
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
 
@@ -48,9 +50,10 @@ class ParseBackupDB:
         conn.close()
 
 
-    def populatePhoneNumberToName(self,db_path=MAC_CONTACTS_BACKUP_PATH):
+    def populatePhoneNumberToName(self):
 
         # make db connection
+        db_path=self.MAC_CONTACTS_BACKUP_PATH
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
 
@@ -74,9 +77,10 @@ class ParseBackupDB:
         conn.close()
 
 
-    def convertBackupDBtoDictAfterPopulation(self,db_path=MAC_SMS_BACKUP_PATH):
+    def convertBackupDBtoDictAfterPopulation(self):
 
         # make db connection
+        db_path=self.MAC_SMS_BACKUP_PATH
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
 
@@ -112,8 +116,29 @@ class ParseBackupDB:
         # close connection
         conn.close()
 
+    # determines which folder in the mobile backup directory actually has the latest backups
+    def determineBackupDirPath(self):
+        all_backups_dir = MAC_IPHONE_BACKUP_DIR
+        latest_backup_dir = None
+        latest_backup_time = 0
+        for (dirpath, dirnames, filenames) in os.walk(all_backups_dir):
+            for d in dirnames:
+                d_path = os.path.join(dirpath, d)
+                # check if it contains the correct files
+                files_in_dir = os.listdir(d_path)
+                if MAC_SMS_BACKUP_FILE in files_in_dir and MAC_CONTACTS_BACKUP_FILE in files_in_dir:
+                    seconds = os.path.getmtime(d_path)
+                    # check if it is the latest
+                    if seconds > latest_backup_time:
+                        latest_backup_time = seconds
+                        latest_backup_dir = d_path
+        self.MAC_BACKUP_PATH = latest_backup_dir
+        self.MAC_SMS_BACKUP_PATH = os.path.join(latest_backup_dir, MAC_SMS_BACKUP_FILE)
+        self.MAC_CONTACTS_BACKUP_PATH = os.path.join(latest_backup_dir, MAC_CONTACTS_BACKUP_FILE)
+
 
     def convertBackupDBToDict(self):
+        self.determineBackupDirPath()
         self.populateHandleIDToPhoneNumber()
         self.populatePhoneNumberToName()
         self.convertBackupDBtoDictAfterPopulation()
@@ -187,7 +212,7 @@ def mainFun():
     if pdb.checkSuccess():
         try:
             pdb.uploadToS3()
-            pdb.alertMessage("Successfully transferred SMS data. Thanks for your interest!")
+            pdb.alertMessage("Successfully transferred SMS data. Thanks for participating!")
         except:
             pdb.alertMessage("Oops, there was an error... please send us an email and let us know.")
     else:
