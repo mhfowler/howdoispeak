@@ -1,0 +1,8 @@
+*secrets*
+*sms.json
+build*
+dist*
+*.pyc
+.idea*
+*.swp
+.DS_STORE

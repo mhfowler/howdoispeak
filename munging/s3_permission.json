@@ -1,0 +1,12 @@
+{
+   "Statement": [
+      {
+         "Sid": "UploadOnlyPermission2",
+         "Effect": "Allow",
+         "Action":   ["s3:putObject","s3:listBucket"],
+         "Resource": [
+            "arn:aws:s3:::howdoispeak"
+         ]
+      }
+   ]
+}
