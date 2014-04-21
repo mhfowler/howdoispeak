@@ -3,7 +3,6 @@ from osascript import osascript, sudo
 from munging.common import PROJECT_PATH, SECRETS
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
-from subprocess import Popen, PIPE
 
 HOME_DIR = os.path.expanduser("~")
 MAC_IPHONE_BACKUP_DIR_RELATIVE = "/Library/Application Support/MobileSync/Backup/"
