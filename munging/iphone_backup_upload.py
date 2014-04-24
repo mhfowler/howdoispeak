@@ -1,4 +1,6 @@
 import os, json, re, sqlite3, datetime, time, random, urllib2
+import datetime
+from time import localtime
 from osascript import osascript, sudo
 from munging.common import PROJECT_PATH, SECRETS
 from boto.s3.connection import S3Connection
@@ -10,19 +12,19 @@ MAC_IPHONE_BACKUP_DIR = HOME_DIR + MAC_IPHONE_BACKUP_DIR_RELATIVE
 MAC_SMS_BACKUP_FILE = "3d0d7e5fb2ce288813306e4d4636395e047a3d28"
 MAC_CONTACTS_BACKUP_FILE = "31bb7ba8914766d4ba40d6dfb6113c8b614be442"
 
-
 class ParseBackupDB:
     # data we will populate
     handle_id_to_phone_number = {}
-    sms_dict = {
-            "user_meta":{},
-            "texts":[]
-        }
+    user_meta = {}
+    sms_data = []
+    count_dict = {}
     phone_number_to_name = {}
     num_unknown = 0
     MAC_SMS_BACKUP_PATH = ""
     MAC_CONTACTS_BACKUP_PATH = ""
     MAC_BACKUP_PATH = ""
+    NGRAM_SIZE=3
+
 
     def stripPhoneNumber(self,phone_number):
         phone_number = re.sub('[^0-9]', '', phone_number)
@@ -30,6 +32,12 @@ class ParseBackupDB:
             phone_number = phone_number[1:]
         return phone_number
 
+    def getTimeTupleKeyFromEpoch(self,epoch):
+        if not epoch:
+            return (0,0,0,0)
+        time_adjusted = epoch + 978307200 # mac absolute time
+        d = datetime.datetime.utcfromtimestamp(time_adjusted)
+        return str(d.hour) + "|" +  str(d.day) + "|" + str(d.month) + "|" + str(d.year)
 
     def populateHandleIDToPhoneNumber(self):
 
@@ -98,8 +106,9 @@ class ParseBackupDB:
                 name= "unknown" + str(handle_id)
 
             # assign name to appropriate person
-            from_user = "me"
-            to_user = "me"
+            me_name = self.getUserName() or "me"
+            from_user = me_name
+            to_user = me_name
             if is_from_me == 1:
                 to_user = name
             else:
@@ -108,13 +117,46 @@ class ParseBackupDB:
                 "from_name":from_user,
                 "to_name":to_user,
                 "text_message":text,
-                "data":date
+                "date":date
             }
-            self.sms_dict["texts"].append(text_data)
+            self.sms_data.append(text_data)
 
 
         # close connection
-        conn.close()
+
+    # get ngrams from text message
+    def getNGramsFromText(self, text, n):
+        if not text:
+            return {}
+        input = text.split(' ')
+        output = {}
+        for i in range(len(input)-n+1):
+            g = ' '.join(input[i:i+n])
+            output.setdefault(g, 0)
+            output[g] += 1
+        return output
+
+
+    # looks through all texts and creates counts dict... conversation, time_block
+    def populateCountDictFromSMSDict(self):
+        texts = self.sms_data
+        for text in texts:
+            from_user = text.get("from_name")
+            to_user = text.get("to_name")
+            date = text.get("date")
+            text_message = text.get("text_message")
+            time_tuple_key = self.getTimeTupleKeyFromEpoch(date)
+            conversation_tuple_key = from_user.replace("|","") + "|" + to_user.replace("|","")
+            relevant_dict = self.count_dict.setdefault(conversation_tuple_key, {})
+            relevant_time_block = relevant_dict.setdefault(time_tuple_key, {})
+            # increment number of texts
+            num_texts = relevant_time_block.setdefault("num_texts",0)
+            relevant_time_block["num_texts"] = num_texts + 1
+            # get ngram dicts for all sizes of ngrams
+            for i in range(1,self.NGRAM_SIZE+1):
+                ngrams_counts = self.getNGramsFromText(text_message, i)
+                relevant_time_block[i] = ngrams_counts
+
 
     # determines which folder in the mobile backup directory actually has the latest backups
     def determineBackupDirPath(self):
@@ -146,9 +188,16 @@ class ParseBackupDB:
 
     def writeSMSDictToFile(self, out_file_path):
         out_file = open(out_file_path, "w")
-        to_write = json.dumps(self.sms_dict)
+        sms_dict = self.getSMSDict()
+        to_write = json.dumps(sms_dict)
         out_file.write(to_write)
 
+    def getSMSDict(self):
+        sms_dict = {
+            "user_meta":self.user_meta,
+            "texts":self.sms_data
+        }
+        return sms_dict
 
     def uploadToS3(self):
         aws_access_key_id = SECRETS["AWS_ACCESS_KEY_ID"]
@@ -166,40 +215,40 @@ class ParseBackupDB:
 
         k = Key(b)
         k.key = st
-        to_write = json.dumps(self.sms_dict)
+        #
+        # to_write = json.dumps(sms_dict)
+        to_write_dict = {
+            "user_meta":self.user_meta,
+            "counts":self.count_dict
+        }
+        to_write = json.dumps(to_write_dict)
         k.set_contents_from_string(to_write)
 
 
     def loadJSONFromFile(self, file_path):
         f = open(file_path, "r")
-        self.sms_dict = json.loads(f.read())
-
+        sms_dict = json.loads(f.read())
+        self.sms_data = sms_dict["texts"]
+        self.user_meta = sms_dict["user_meta"]
 
     def getPublicIPAddress(self):
-        self.sms_dict["user_meta"]["ip_address"] = urllib2.urlopen('http://ip.42.pl/raw').read()
+        self.user_meta["ip_address"] = urllib2.urlopen('http://ip.42.pl/raw').read()
 
     def promptForUserName(self):
         scpt = '''
-        on run {}
-        display dialog "Please enter your name or email so we know who to send the results of your SMS analysis to then press OK to start the data transfer." default answer ""
-            set full_name to text returned of result
-            return full_name
-        end run
-        '''
-        scpt = '''
-        display dialog "Thanks for your participation in HowDoISpeak!\n\nThis script will securely transfer your SMS data to the HowDoISpeak database where we will run sentiment and word frequency analysis (without any human reading any of your texts).\n\nPlease enter your name or email so we know who to send the results of your SMS analysis to then press OK to start the data transfer." default answer ""
+        display dialog "Thanks for your participation in HowDoISpeak!\n\nThis script will securely transfer your SMS word frequency data to the HowDoISpeak database where we will run sentiment and vocabulary analysis.\n\nPlease enter your name or email so we know who to send the results of your analysis to then press OK to start the data transfer." default answer ""
             set full_name to text returned of result
             return full_name
         '''
         full_name = self.runAppleScript(scpt)
         full_name = full_name.replace("\n","")
-        self.sms_dict["user_meta"]["user_name"] = full_name
+        self.user_meta["user_name"] = full_name
 
     def getUserName(self):
-        return self.sms_dict["user_meta"].get("user_name")
+        return self.user_meta.get("user_name")
 
     def checkSuccess(self):
-        text_messages = self.sms_dict["texts"]
+        text_messages = self.sms_data
         return len(text_messages) > 5
 
     def runAppleScript(self, scpt):
@@ -222,13 +271,14 @@ def mainFun():
     pdb.promptForUserName()
     pdb.alertMessage("It may take a couple minutes to process your SMS Data. Please wait for a notification that the script is finished.")
     pdb.convertBackupDBToDict()
+    pdb.populateCountDictFromSMSDict()
     pdb.getPublicIPAddress()
     ERROR_MESSAGE = "Oops, there was an error in the HowDoISpeak transfer script. We would appreciate it if you send us an email to let us know about the error."
     if pdb.checkSuccess():
         try:
             pdb.uploadToS3()
             pdb.alertMessage("HowDoISpeak successfully transferred your SMS data.\n\nThanks for participating!\n\nWe'll send you an email when your analysis is finished.")
-        except:
+        except Exception as e:
             pdb.alertMessage(ERROR_MESSAGE)
     else:
         pdb.alertMessage(ERROR_MESSAGE)
