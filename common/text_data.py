@@ -138,7 +138,7 @@ class TextData():
                 for word,count in words_counts.items():
                     for i in range(count):
                         time_block_text_blob += " " + word
-                ngram_dict["text_blob"] = time_block_text_blob
+                time_dict["text_blob"] = time_block_text_blob
                 conversation_text_blob += time_block_text_blob
             conversation_dict["text_blob"] = conversation_text_blob
             text_blob += conversation_text_blob
@@ -196,8 +196,8 @@ class TextData():
             len_b = len(tuple_b)
             if len_a != len_b: print "wtf"
             for i in range(0,len_a):
-                a = tuple_a[len_a-i-1]
-                b = tuple_b[len_b-i-1]
+                a = int(tuple_a[len_a-i-1])
+                b = int(tuple_b[len_b-i-1])
                 if a < b:
                     return -1
                 elif a > b:
@@ -214,10 +214,15 @@ class TextData():
 
 if __name__ == "__main__":
     td = TextData()
-    s3_keys = td.getS3Keys(1)
-    td.loadFromS3Keys(s3_keys)
-    # td.calcTextBlobs()
-    text_counts = td.calcTextCounts("Max Fowler")
+    s3_keys = td.getS3Keys()
+    the_key = None
+    for key in s3_keys:
+        if "hendrik" in key.name:
+            the_key = key
+    td.loadFromS3Keys([the_key])
+    print td.calcTextBlobs()
+    username = random.choice(list(td.usernames)[0])
+    text_counts = td.calcTextCounts(username)
     for time_key, counts in td.returnOrderedTimeDict(text_counts):
         print str(time_key) + " " + str(counts["all"]) + " " + str(counts["from"]) + " " + str(counts["to"])
 

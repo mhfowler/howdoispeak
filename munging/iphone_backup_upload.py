@@ -277,7 +277,7 @@ def mainFun():
     if pdb.checkSuccess():
         try:
             pdb.uploadToS3()
-            pdb.alertMessage("HowDoISpeak successfully transferred your SMS data.\n\nThanks for participating!\n\nWe'll send you an email when your analysis is finished.")
+            pdb.alertMessage("HowDoISpeak successfully transferred your SMS word frequency data.\n\nThanks for participating!\n\nWe'll send you an email when your analysis is finished.")
         except Exception as e:
             pdb.alertMessage(ERROR_MESSAGE)
     else:
