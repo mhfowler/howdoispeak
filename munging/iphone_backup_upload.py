@@ -209,7 +209,9 @@ class ParseBackupDB:
         st = st + " ~" + random_appendage + "~ "
 
         user_name = self.getUserName() or "unknown"
+        folder = "raw/"
         st = st + " " + user_name
+        st = folder + st
 
         b = conn.get_bucket('howdoispeak')
 
