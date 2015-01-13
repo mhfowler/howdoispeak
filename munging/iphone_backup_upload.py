@@ -1,10 +1,19 @@
 import os, json, re, sqlite3, datetime, time, random, urllib2
 import datetime
+import requests
 from time import localtime
 from osascript import osascript, sudo
 from munging.common import PROJECT_PATH, SECRETS
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
+import urllib, httplib
+
+# TEST_MODE = os.environ.get("TEST_MODE")
+TEST_MODE = True
+if TEST_MODE:
+    print "-- TEST MODE --"
+else:
+    print "++ LIVE MODE ++"
 
 HOME_DIR = os.path.expanduser("~")
 MAC_IPHONE_BACKUP_DIR_RELATIVE = "/Library/Application Support/MobileSync/Backup/"
@@ -109,15 +118,18 @@ class ParseBackupDB:
             me_name = self.getUserName() or "me"
             from_user = me_name
             to_user = me_name
+            is_from_me_int = 0
             if is_from_me == 1:
                 to_user = name
+                is_from_me_int = 1
             else:
                 from_user = name
             text_data = {
                 "from_name":from_user,
                 "to_name":to_user,
                 "text_message":text,
-                "date":date
+                "date":date,
+                "is_from_me":is_from_me_int
             }
             self.sms_data.append(text_data)
 
@@ -204,27 +216,80 @@ class ParseBackupDB:
         aws_secret_access_key = SECRETS["AWS_SECRET_ACCESS_KEY"]
         conn = S3Connection(aws_access_key_id, aws_secret_access_key)
 
-        st = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+        st = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d|%H:%M:%S')
         random_appendage = str(random.randint(0,10000000000))
-        st = st + " ~" + random_appendage + "~ "
+        st = st + "|~" + random_appendage + "~"
 
         user_name = self.getUserName() or "unknown"
-        folder = "raw/"
-        st = st + " " + user_name
-        st = folder + st
+        if TEST_MODE:
+            folder = "test/raw/"
+        else:
+            folder = "raw/"
+        st = st + "|" + user_name
+        key_name = folder + st
 
         b = conn.get_bucket('howdoispeak')
 
         k = Key(b)
-        k.key = st
-        #
-        # to_write = json.dumps(sms_dict)
+        k.key = key_name
+
+        sms_dict = self.getSMSDict()
+
+        # fill out a dictionary of raw conversations
+        orig_user_name = self.getUserName()
+        conversations_dict = {}
+        for text in sms_dict["texts"]:
+            from_name = text["from_name"]
+            to_name = text["to_name"]
+            if to_name == orig_user_name:
+                convo_with = from_name
+            else:
+                convo_with = to_name
+            conversation = conversations_dict.setdefault(convo_with, [])
+            conversation.append(text)
+        # sort conversations by time
+        for convo_with, conversation in conversations_dict.items():
+            conversation.sort(key=lambda x: x["date"])
+
+        # write and save
         to_write_dict = {
             "user_meta":self.user_meta,
-            "counts":self.count_dict
+            "counts":self.count_dict,
+            "conversations":conversations_dict
         }
         to_write = json.dumps(to_write_dict)
+
+        # write it to a test file for debugging
+        test_file = "/Users/maxfowler/Desktop/cs/howdoispeak/dist/test.txt"
+        with open(test_file, "w") as test_f:
+            test_f.write(to_write)
+
+        # push contents to s3
         k.set_contents_from_string(to_write)
+
+        # ping request to howdoispeak.com to process data
+        # domain = 'http://howdoispeak.com'
+        domain = 'http://127.0.0.1:8000'
+        values = {
+            'raw_key_name' : key_name,
+            # 'should_queue' : "True",
+            # 'should_queue' : "False",
+        }
+        page = "/process/"
+        data = urllib.urlencode(values)
+
+        # h = httplib.HTTPConnection(domain)
+        # headers = {"Content-type": "application/x-www-form-urlencoded", "Accept": "text/plain"}
+        # h.request('POST', '/process/', data, headers)
+        # response = h.getresponse()
+        # response = urllib2.urlopen(domain + page, data=data)
+
+        url = domain + page
+        print "trigger: " + url
+        response = requests.get(url, params=values)
+        print "url: " + response.url
+
+        print "finished: " + str(response.text)
 
 
     def loadJSONFromFile(self, file_path):
@@ -238,7 +303,7 @@ class ParseBackupDB:
 
     def promptForUserName(self):
         scpt = '''
-        display dialog "Thanks for your participation in HowDoISpeak!\n\nThis script will securely transfer your SMS word frequency data to the HowDoISpeak database where we will run sentiment and vocabulary analysis.\n\nPlease enter your name or email so we know who to send the results of your analysis to then press OK to start the data transfer." default answer ""
+        display dialog "Thanks for your participation in HowDoISpeak!\n\nThis script will securely transfer your SMS data to the HowDoISpeak database where an automated server will process your texts and send you a secret link to your analysis.\n\nPlease enter the email you would like the secret link to be sent to and then press OK to start the data transfer." default answer ""
             set full_name to text returned of result
             return full_name
         '''
@@ -271,7 +336,9 @@ class ParseBackupDB:
 def mainFun():
     pdb = ParseBackupDB()
     pdb.promptForUserName()
-    pdb.alertMessage("It may take a couple minutes to process your SMS Data. Please wait for a notification that the script is finished.")
+    pdb.alertMessage("Please keep your computer on until you receive a notification that the script is finished --  the script may take 2-3 hours to complete.\n\n "
+                     "The script runs for so long because the HowDoISpeak server requires that your computer keep an open connection with the server while it is analyzing your data "
+                     "as a safeguard against spamming. ")
     pdb.convertBackupDBToDict()
     pdb.populateCountDictFromSMSDict()
     pdb.getPublicIPAddress()
@@ -279,7 +346,7 @@ def mainFun():
     if pdb.checkSuccess():
         try:
             pdb.uploadToS3()
-            pdb.alertMessage("HowDoISpeak successfully transferred your SMS word frequency data.\n\nThanks for participating!\n\nWe'll send you an email when your analysis is finished.")
+            pdb.alertMessage("HowDoISpeak successfully transferred your SMS data.\n\nThanks for participating!\n\nYou will receive an email with your secret link when your analysis is finished.")
         except Exception as e:
             pdb.alertMessage(ERROR_MESSAGE)
     else:
