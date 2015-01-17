@@ -267,9 +267,10 @@ class ParseBackupDB:
         to_write = json.dumps(to_write_dict)
 
         # write it to a test file for debugging
-        test_file = "/Users/maxfowler/Desktop/cs/howdoispeak/dist/test.txt"
-        with open(test_file, "w") as test_f:
-            test_f.write(to_write)
+        # if TEST_MODE:
+        #     test_file = "/Users/maxfowler/Desktop/cs/howdoispeak/dist/test.txt"
+        #     with open(test_file, "w") as test_f:
+        #         test_f.write(to_write)
 
         # push contents to s3
         print "... transferring data"
