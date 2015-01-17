@@ -9,7 +9,7 @@ from boto.s3.key import Key
 import urllib, httplib
 
 # TEST_MODE = os.environ.get("TEST_MODE")
-TEST_MODE = True
+TEST_MODE = False
 if TEST_MODE:
     print "-- TEST MODE --"
 else:
@@ -276,11 +276,11 @@ class ParseBackupDB:
         k.set_contents_from_string(to_write)
 
         # ping request to howdoispeak.com to process data
-        # domain = 'http://howdoispeak.com'
-        domain = 'http://127.0.0.1:8000'
+        domain = 'http://howdoispeak.com'
+        # domain = 'http://127.0.0.1:8000'
         values = {
             'raw_key_name' : key_name,
-            # 'should_queue' : "True",
+            'should_queue' : "True",
             # 'should_queue' : "False",
         }
         page = "/process/"
@@ -345,11 +345,11 @@ def mainFun():
     pdb = ParseBackupDB()
     pdb.promptForUserName()
     # the long version
-    pdb.alertMessage("Please keep your computer on until you receive a notification that the script is finished --  the script may take 2-3 hours to complete.\n\n"
-                     "The script runs for so long because the HowDoISpeak server requires that your computer keep an open connection with the server while it is analyzing your data "
-                     "as a safeguard against spamming. ")
+    # pdb.alertMessage("Please keep your computer on until you receive a notification that the script is finished --  the script may take 2-3 hours to complete.\n\n"
+    #                  "The script runs for so long because the HowDoISpeak server requires that your computer keep an open connection with the server while it is analyzing your data "
+    #                  "as a safeguard against spamming. ")
     # the short version
-    # pdb.alertMessage("Please keep your computer on until you receive a notification that the script is finished --  the script may take 10-20 minutes to complete.\n\n")
+    pdb.alertMessage("Please keep your computer on until you receive a notification that the script is finished --  the script may take 10-20 minutes to complete.\n\n")
     pdb.convertBackupDBToDict()
     pdb.populateCountDictFromSMSDict()
     pdb.getPublicIPAddress()
