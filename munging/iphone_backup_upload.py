@@ -131,7 +131,14 @@ class ParseBackupDB:
                 "date":date,
                 "is_from_me":is_from_me_int
             }
-            self.sms_data.append(text_data)
+            # limit texts to recent texts for efficiency of testing
+            if TEST_MODE:
+                cutoff_time = 1388534400.0 - 978307200 # 1/1/2014
+                if text_data.get("date") > cutoff_time:
+                    self.sms_data.append(text_data)
+            # all texts for live
+            else:
+                self.sms_data.append(text_data)
 
 
         # close connection
@@ -265,6 +272,7 @@ class ParseBackupDB:
             test_f.write(to_write)
 
         # push contents to s3
+        print "... transferring data"
         k.set_contents_from_string(to_write)
 
         # ping request to howdoispeak.com to process data
@@ -336,9 +344,12 @@ class ParseBackupDB:
 def mainFun():
     pdb = ParseBackupDB()
     pdb.promptForUserName()
-    pdb.alertMessage("Please keep your computer on until you receive a notification that the script is finished --  the script may take 2-3 hours to complete.\n\n "
+    # the long version
+    pdb.alertMessage("Please keep your computer on until you receive a notification that the script is finished --  the script may take 2-3 hours to complete.\n\n"
                      "The script runs for so long because the HowDoISpeak server requires that your computer keep an open connection with the server while it is analyzing your data "
                      "as a safeguard against spamming. ")
+    # the short version
+    # pdb.alertMessage("Please keep your computer on until you receive a notification that the script is finished --  the script may take 10-20 minutes to complete.\n\n")
     pdb.convertBackupDBToDict()
     pdb.populateCountDictFromSMSDict()
     pdb.getPublicIPAddress()
